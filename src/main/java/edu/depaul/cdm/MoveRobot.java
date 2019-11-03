@@ -30,6 +30,12 @@ public class MoveRobot {
 	static int floorLength;  //The complete number of units for the Floor Plan 
 	static Stack<Point> trail = new Stack<Point>(); //Robots Trail
 	static HashSet<Point> visited = new HashSet<Point>(); //Visited Floor Units
+
+	public int peek_x;
+	public int peek_y;
+	public int return_to_charger_counter;
+
+	PowerManagement powerManagement = PowerManagement.getInstance();
 	
 	public MoveRobot (int[][] floor, int xCord, int yCord){  
 		MoveRobot.floor = floor;
@@ -39,12 +45,22 @@ public class MoveRobot {
 		MoveRobot.rowLength = floor.length;
 		MoveRobot.floorLength = colLength * rowLength; 
 		System.out.println("Floor Length: " + floorLength);
+
+		this.peek_x = 0;
+		this.peek_y = 0;
+		this.return_to_charger_counter = 0;
 	}
 	
 	//Gives the Current Coordinates (might not be called)
 	public int[] getCords(){
 		int[] cords = {x, y};
 		return cords;
+	}
+
+	public void set_peek_values(int x_, int y_)
+	{
+		this.peek_x = x_;
+		this.peek_y = y_;
 	}
 
 	private static boolean safePath(){	
@@ -60,7 +76,22 @@ public class MoveRobot {
 		{ y--; return true; }		
 		else{ return false; }
 	}
-	
+
+	// To see what next move is
+	private boolean peek_safe_path(){
+		//1st Priority to Move rightward
+		if (peek_x+1 >=0 && peek_x+1 <colLength && !visited.contains(new Point(peek_x+1, peek_y)))
+		{ peek_x++; return true;}
+		//Clockwise Priority from here onward:
+		else if (peek_y+1 >=0 && peek_y+1 <rowLength && !visited.contains(new Point(peek_x, peek_y+1)))
+		{ peek_y++; return true;}
+		else if (peek_x-1 >=0 && peek_x-1 <colLength && !visited.contains(new Point(peek_x-1, peek_y)))
+		{ peek_x--; return true;}
+		else if (peek_y-1 >=0 && peek_y-1 <rowLength && !visited.contains(new Point(peek_x, peek_y-1)))
+		{ peek_y--; return true;}
+		else{return false;}
+	}
+
 	private static void backTrack(){
 		trail.pop();
 		x = trail.peek().x;
@@ -73,19 +104,53 @@ public class MoveRobot {
 		Locator locator = new Locator();
 		
 		dirtFloor = DirtLevel.getDirtLevel(floor);
+		DirtLevelSensor dirtSensor = new DirtLevelSensor(dirtFloor);
+
 		ObstacleSensor obsSensor = new ObstacleSensor(floor);
+
+		int current_cell_cost = 0;
+		int next_cell_cost = 0;
+		int average_move_cost = 0;
 		
-		while (visited.size() < floorLength)	{
+		while (visited.size() < floorLength)
+		{
+			// Pass in current cell coords
+			powerManagement.set_x_y_coords(x, y);
+
+			//  Check if battery level is sufficient before move is made.
+			// At 2,2 so check what units of energy use is.
+			current_cell_cost = powerManagement.switch_floor_types(x, y);
+
+			// Check what next move's units of energy use is. It's 3,2
+			this.set_peek_values(x, y);
+			if(peek_safe_path())
+			{
+				next_cell_cost = powerManagement.switch_floor_types(this.peek_x, this.peek_y);
+
+				// Since next move is valid take average cost of two moves
+				average_move_cost = powerManagement.average_cost(current_cell_cost, next_cell_cost);
+
+				this.return_to_charger_counter += average_move_cost;
+			}
+
+			// Check that battery has enough power for next move.
+			// Need to consider what battery amount is needed for return to
+			// charger if power level goes below this point since it will
+			// have to head back to charger.
+
+
 
 			if (safePath()){
+
 				System.out.println("Visited Y&X Cords: " + y + " | "+ x);
 				visited.add(new Point(x, y));
-				if ((obsSensor.checkObstacle(y, x)) == true){
+				if ((obsSensor.checkObstacle(x, y)) == true){
 					locator.setX(x);
 					locator.setY(y);
 					trail.push(new Point(x, y));
 					
-					if (dirtFloor[y][x]==1 || dirtFloor[y][x]==2 || dirtFloor[y][x]==3){
+					if (dirtSensor.checkDirtLevel(x, y) == true)
+					{
 						System.out.println("Cleaning: Y&X " + y + " | " + x);
 						Thread.sleep(1000); //1 second delay
 						System.out.println();
